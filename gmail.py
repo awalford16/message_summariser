@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 import base64
+import re
 from pprint import pprint
 
 # If modifying these scopes, delete the file token.json.
@@ -49,10 +50,11 @@ class Gmail:
     def read_mail_label(self, label):
         results = self.service.users().messages().list(userId='me', q='label:' + label).execute()
         if 'messages' in results:
-            for message in results['messages']:
-                self.get_mail_payload(message["id"])
+            # for message in results['messages'][1]:
+            #     print(f"Adding mail {message['id']}")
+            self.get_mail_payload(label, results['messages'][2]["id"])
 
-    def get_mail_payload(self, message_id):
+    def get_mail_payload(self, label, message_id):
         message = self.service.users().messages().get(userId='me', id=message_id).execute()
 
         # Extract the content of the message from the payload field
@@ -66,8 +68,38 @@ class Gmail:
             body = payload['body']['data']
 
         message_content = base64.urlsafe_b64decode(body).decode('utf-8')
-        pprint(message_content)
+        
+        clean_message = self.clean_file(message_content)
+        self.topic_splitter(label, clean_message)
 
-if __name__ == '__main__':
-    gmail = Gmail()
-    gmail.read_mail_label("Morning Brew")
+        print(os.path.getsize(f"{label}.txt"), "bytes")
+
+    def clean_file(self, content):
+        # Remove HTML tags and empty lines
+        clean_message = re.sub('<[^<]+?>', '', content)
+        clean_message = re.sub(r'\n\s*\n', '\n', clean_message)
+        return clean_message
+
+    def topic_splitter(self, label, content):
+        topics = ["WORLD","GOVERNMENT","SPORTS","WORK"]
+        for topic in topics:
+            pattern = rf"\n{topic}\r\n(.*?)(\n[A-Z].+\r\n)"
+            result = re.search(pattern, content, re.DOTALL)
+            print(result)
+
+            if result:
+                with open(f"{label}_{topic}.txt", 'w') as file:
+                    file.writelines(result.group(1).strip())
+            else:
+                print("No section content found")
+
+    def remove_trailer(self, label):
+        with open(f"{label}.txt", 'r') as file:
+            lines = file.readlines()
+
+        # Remove the last 60 lines from the list of lines
+        new_lines = lines[:-60]
+
+        # Write the remaining lines back to the file
+        with open(f"{label}.txt", 'w') as file:
+            file.writelines(new_lines)
